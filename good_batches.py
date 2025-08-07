@@ -71,7 +71,7 @@ def allocate_counts(N, probs):
     return int_alloc.tolist()
 
 
-softmax_temp = 4
+softmax_temp = 8
 batch_size = 64
 test_batch_size = 1000
 
@@ -154,7 +154,7 @@ optimizer_loss_selection = optim.Adam(model_loss_selection.parameters(), lr=1e-3
 
 
 # Training loop
-epochs = 1
+epochs = 3
 probabilities_evolution = []
 for epoch in range(epochs):
     model_vanilla.train()
