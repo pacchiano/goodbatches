@@ -3,10 +3,38 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, Subset
 
-### Utility
+### Utilities
+
+
+def running_average(arr: np.ndarray, m: int) -> np.ndarray:
+    """
+    Compute running averages along axis 1 with window size m.
+    For the first m-1 columns, average only from the start up to that point.
+    
+    Parameters:
+    - arr: np.ndarray of shape (d, n)
+    - m: int, window size
+
+    Returns:
+    - np.ndarray of shape (d, n) with running averages
+    """
+    d, n = arr.shape
+    cumsum = np.cumsum(arr, axis=1)
+    result = np.zeros((d, n))
+
+    # First m-1 entries: average from the beginning
+    for i in range(m):
+        result[:, i] = cumsum[:, i] / (i + 1)
+
+    # Entries from m onward: use rolling window average
+    result[:, m:] = (cumsum[:, m:] - cumsum[:, :-m]) / m
+
+    return result
+
 
 def allocate_counts(N, probs):
     """
@@ -43,7 +71,7 @@ def allocate_counts(N, probs):
     return int_alloc.tolist()
 
 
-softmax_temp = 1
+softmax_temp = 4
 batch_size = 64
 test_batch_size = 1000
 
@@ -126,7 +154,8 @@ optimizer_loss_selection = optim.Adam(model_loss_selection.parameters(), lr=1e-3
 
 
 # Training loop
-epochs = 5
+epochs = 1
+probabilities_evolution = []
 for epoch in range(epochs):
     model_vanilla.train()
     for x, y in train_loader:
@@ -175,11 +204,18 @@ for epoch in range(epochs):
 
         ### compute the proportion to sample per class
         ### use an exponential softmax rule
+        loss_stats = np.array(loss_stats)/np.linalg.norm(loss_stats) ### normalize the loss stats
+        #loss_stats = 
+
         exponentiated_losses =  [np.exp(l*softmax_temp) for l in loss_stats ]
         normalization_factor = sum(exponentiated_losses)
         probabilities = [e/normalization_factor for e in exponentiated_losses]
+        probabilities_evolution.append(probabilities)
+
 
         count_allocation = allocate_counts(batch_size, probabilities)
+
+        #print("count allocation ", count_allocation)
 
         ### Create the batch
         filtered_batch = [( x[:a,:], y[:a] ) for ((x,y), a) in zip(next_batches, count_allocation)]
@@ -208,6 +244,7 @@ with torch.no_grad():
         total += y.size(0)
 
 print(f"Vanilla Test Accuracy: {100.0 * correct / total:.2f}%")
+vanilla_accuracy = 100.0 * correct / total
 
 ### Per class test accuracy
 accuracy_stats = []
@@ -219,9 +256,9 @@ for test_loader_class in test_loaders_per_class:
             preds = model_vanilla(x).argmax(dim=1)
             correct += (preds == y).sum().item()
             total += y.size(0)
-    accuracy_stats.append((correct, total))
+    accuracy_stats.append(100.0*correct/ total)
 
-print("Per class accuracy ", [100.0*correct/total for (correct,total) in accuracy_stats])
+print("Per class accuracy ", accuracy_stats)
 
 # Evaluate on test set
 model_loss_selection.eval()
@@ -234,10 +271,10 @@ with torch.no_grad():
         total += y.size(0)
 
 print(f"Loss Selection Test Accuracy: {100.0 * correct / total:.2f}%")
-
+loss_accuracy = 100.0 * correct / total
 
 ### Per class test accuracy
-accuracy_stats = []
+loss_accuracy_stats = []
 for test_loader_class in test_loaders_per_class: 
     correct, total = 0, 0
     with torch.no_grad():
@@ -246,9 +283,54 @@ for test_loader_class in test_loaders_per_class:
             preds = model_loss_selection(x).argmax(dim=1)
             correct += (preds == y).sum().item()
             total += y.size(0)
-    accuracy_stats.append((correct, total))
+    loss_accuracy_stats.append(100.0*correct/total)
 
-print("Per class accuracy ", [100.0*correct/total for (correct,total) in accuracy_stats])
+print("Per class accuracy ", loss_accuracy_stats)
+
+labels = [str(i) for i in range(10)] + ["Total"]
+x = np.arange(len(labels))
+width = 0.35
+
+fig, ax = plt.subplots()
+ax.bar(x - width/2, accuracy_stats + [vanilla_accuracy], width, label='Vanilla')
+ax.bar(x + width/2, loss_accuracy_stats + [loss_accuracy], width, label='Loss Method')
+
+ax.set_xlabel('Labels')
+ax.set_ylabel('Accuracy')
+ax.set_title('Histogram of Vanilla and Loss Method grouped by label')
+ax.set_xticks(x)
+ax.set_xticklabels(labels)
+ax.set_ylim(90,100)
+ax.legend(loc='upper left', bbox_to_anchor=(1.0, 0.5))
+plt.tight_layout()
+plt.show()
+
+
+### plot the probabilities_evolution
+average_step = 100
+probabilities_evolution = np.array(probabilities_evolution).transpose()
+probabilities_evolution = running_average(probabilities_evolution, average_step)
+
+(d,n) = probabilities_evolution.shape
+#IPython.embed()
+
+plt.figure(figsize=(10, 6))
+for dim in range(d):
+    plt.plot(range(n), probabilities_evolution[dim, :], label=f'Label {dim}')
+
+
+#plt.subplots_adjust(right=0.75)
+
+plt.xlabel('Batch number')
+plt.ylabel('Probability')
+plt.title('Evolution of class probabilities over time')
+plt.legend()
+plt.grid(True)
+plt.legend(loc='upper left', bbox_to_anchor=(1.0, 0.5))
+plt.tight_layout()
+plt.show()
+
+
 
 
 IPython.embed()
