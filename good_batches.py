@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 from torch.utils.data import DataLoader, Subset
 
 ### Utilities
@@ -80,7 +80,6 @@ epochs = 5
 dataset = "MNIST"
 
 
-
 # Define the MLP model
 class MLP(nn.Module):
     def __init__(self, input_size=784, hidden_size=128, num_classes=10):
@@ -104,7 +103,7 @@ if dataset == "MNIST":
     train_dataset = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
     test_dataset  = datasets.MNIST(root='./data', train=False, transform=transform, download=True)
 
-elif dataset == "CFAR10":
+elif dataset == "CIFAR10":
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
@@ -119,10 +118,22 @@ elif dataset == "CFAR10":
                              (0.2023, 0.1994, 0.2010)),
     ])
 
-    train_dataset = torchvision.datasets.CIFAR10(root='./data', train=True,
+    train_dataset = datasets.CIFAR10(root='./data', train=True,
                                                  download=True, transform=transform_train)
-    test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False,
+    test_dataset = datasets.CIFAR10(root='./data', train=False,
                                                 download=True, transform=transform_test)
+
+elif dataset == "SVHN":
+
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4377, 0.4438, 0.4728), (0.1980, 0.2010, 0.1970)),  # SVHN stats
+    ])
+
+    train_dataset = datasets.SVHN(root='./data', split='train', download=True, transform=transform)
+    test_dataset = datasets.SVHN(root='./data', split='test', download=True, transform=transform)
+
+
 
 else:
     raise ValueError("unknown dataset")
@@ -176,8 +187,20 @@ if dataset == "MNIST":
     model_vanilla = MLP().to(device)
     model_loss_selection = MLP().to(device)
 elif dataset == "CIFAR10":
-    model_vanilla = torchvision.models.resnet18(num_classes=10)
-    model_loss_selection = torchvision.models.resnet18(num_classes=10)
+    model_vanilla = models.resnet18(num_classes=10).to(device)
+    model_loss_selection = models.resnet18(num_classes=10).to(device)
+
+elif dataset == "SVHN":
+    model_vanilla = models.resnet18(num_classes=10)
+    model_vanilla.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)  # Adjust for 32x32
+    model_vanilla.maxpool = nn.Identity()  # Remove maxpool to preserve resolution
+    model_vanilla = model_vanilla.to(device)
+
+    model_loss_selection = models.resnet18(num_classes=10)
+    model_loss_selection.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)  # Adjust for 32x32
+    model_loss_selection.maxpool = nn.Identity()  # Remove maxpool to preserve resolution
+    model_loss_selection = model_loss_selection.to(device)
+
 else:
     raise ValueError("Unknown dataset")
 
@@ -190,9 +213,11 @@ optimizer_loss_selection = optim.Adam(model_loss_selection.parameters(), lr=1e-3
 # Training loop
 probabilities_evolution = []
 for epoch in range(epochs):
+    counter  = 1
     model_vanilla.train()
     for x, y in train_loader:
-
+        print("epoch {} bach {}".format(epoch, counter))
+        counter += 1
         ### Train vanilla
         x, y = x.to(device), y.to(device)
         logits_vanilla = model_vanilla(x)
